@@ -282,6 +282,11 @@ public:
     void unlock() { os_mutex_recursive_unlock(mutex); };
 
     /**
+     * @brief Enable / Disable the immediate use of the filesystem to publish events.
+     */
+    void setUseFileSystem(bool mode){useExclusiveFs = mode;};
+
+    /**
      * @brief Magic bytes store at the beginning of event files for validity checking
      */
     static const uint32_t FILE_MAGIC = 0x31b67663;
@@ -399,6 +404,8 @@ protected:
     static void systemEventHandler(system_event_t event, int param); //!< system event handler, used to detect reset events
 
     static PublishQueuePosix *_instance; //!< singleton instance of this class
+
+    bool useExclusiveFs;    //!< Flag to enable file system publishing 
 };
 
 #endif /* __PUBLISHQUEUEPOSIXRK_H */

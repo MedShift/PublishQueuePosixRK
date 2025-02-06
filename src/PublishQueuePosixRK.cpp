@@ -10,7 +10,6 @@ PublishQueuePosix *PublishQueuePosix::_instance;
 
 static Logger _log("app.pubq");
 
-
 PublishQueuePosix &PublishQueuePosix::instance() {
     if (!_instance) {
         _instance = new PublishQueuePosix();
@@ -70,22 +69,38 @@ void PublishQueuePosix::loop() {
 bool PublishQueuePosix::publishCommon(const char *eventName, const char *eventData, int ttl, PublishFlags flags1, PublishFlags flags2) {
 
     PublishQueueEvent *event = newRamEvent(eventName, eventData, flags1 | flags2);
-    if (!event) {
+    if (event != NULL)
+    {
         return false;
     }
+    
     _log.trace("publishCommon eventName=%s eventData=%s", eventName, eventData ? eventData : "");
 
-    WITH_LOCK(*this) {
-        ramQueue.push_back(event);
+    WITH_LOCK(*this)
+    {
+        if(useExclusiveFs == false)
+        {
+            ramQueue.push_back(event);
 
-        _log.trace("fileQueueLen=%u ramQueueLen=%u connected=%d", fileQueue.getQueueLen(), ramQueue.size(), Particle.connected());
+            _log.trace("fileQueueLen=%u ramQueueLen=%u connected=%d", fileQueue.getQueueLen(), ramQueue.size(), Particle.connected());
 
-        if (fileQueue.getQueueLen() == 0 && (ramQueue.size() <= ramQueueSize) && Particle.connected()) {
-            // No files in the disk-based queue, RAM-based queue is not full, and we are cloud connected
-            // Leave the event in the RAM queue and return true
-            _log.trace("queued to ramQueue");
+            if (fileQueue.getQueueLen() == 0 && (ramQueue.size() <= ramQueueSize) && Particle.connected())
+            {
+                // No files in the disk-based queue, RAM-based queue is not full, and we are cloud connected
+                // Leave the event in the RAM queue and return true
+                _log.trace("queued to ramQueue");
+            }
+            else
+            {
+                // We need to move the queue to the file system
+                writeQueueToFiles();
+            }
         }
-        else {
+        else
+        {
+            // Use ram queue as container that writeQueueToFiles uses
+            ramQueue.push_back(event);
+
             // We need to move the queue to the file system
             writeQueueToFiles();
         }

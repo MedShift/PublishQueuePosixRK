@@ -69,7 +69,7 @@ void PublishQueuePosix::loop() {
 bool PublishQueuePosix::publishCommon(const char *eventName, const char *eventData, int ttl, PublishFlags flags1, PublishFlags flags2) {
 
     PublishQueueEvent *event = newRamEvent(eventName, eventData, flags1 | flags2);
-    if (event != NULL)
+    if (event == NULL)
     {
         return false;
     }
@@ -98,7 +98,7 @@ bool PublishQueuePosix::publishCommon(const char *eventName, const char *eventDa
         }
         else
         {
-            if((ramQueue.size() <= ramQueueSize) && Particle.connected())
+            if((ramQueue.size() <= ramQueueSize))
             {
                 // Use ram queue as container that writeQueueToFiles uses
                 ramQueue.push_back(event);

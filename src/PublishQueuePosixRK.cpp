@@ -98,11 +98,18 @@ bool PublishQueuePosix::publishCommon(const char *eventName, const char *eventDa
         }
         else
         {
-            // Use ram queue as container that writeQueueToFiles uses
-            ramQueue.push_back(event);
+            if((ramQueue.size() <= ramQueueSize) && Particle.connected())
+            {
+                // Use ram queue as container that writeQueueToFiles uses
+                ramQueue.push_back(event);
 
-            // We need to move the queue to the file system
-            writeQueueToFiles();
+                // We need to move the queue to the file system
+                writeQueueToFiles();
+            }
+            else
+            {
+                _log.trace("queued to ramQueue");
+            }
         }
         checkQueueLimits();
     }

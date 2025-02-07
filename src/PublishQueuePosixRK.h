@@ -405,7 +405,7 @@ protected:
 
     static PublishQueuePosix *_instance; //!< singleton instance of this class
 
-    bool useExclusiveFs;    //!< Flag to enable file system publishing 
+    bool useExclusiveFs = false;    //!< Flag to enable file system publishing 
 };
 
 #endif /* __PUBLISHQUEUEPOSIXRK_H */

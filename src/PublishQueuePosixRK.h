@@ -5,8 +5,8 @@
 // License: MIT
 
 #include "Particle.h"
+#include "lockable.h"
 #include "SequentialFileRK.h"
-#include "Lockable.h"
 
 #include <deque>
 
@@ -138,7 +138,7 @@ public:
 	 * oldest (sometimes second oldest) is discarded.
 	 */
 	inline bool publish(const char *eventName, PublishFlags flags1, PublishFlags flags2 = PublishFlags()) {
-		return publishCommon(eventName, "", 60, flags1, flags2);
+		return publishCommon(eventName, "", 60, flags1, flags2, false);
 	}
 
 	/**
@@ -158,7 +158,7 @@ public:
 	 * oldest (sometimes second oldest) is discarded.
 	 */
 	inline bool publish(const char *eventName, const char *data, PublishFlags flags1, PublishFlags flags2 = PublishFlags()) {
-		return publishCommon(eventName, data, 60, flags1, flags2);
+		return publishCommon(eventName, data, 60, flags1, flags2, false);
 	}
 
 	/**
@@ -181,12 +181,12 @@ public:
 	 * This function almost always returns true. If you queue more events than fit in the buffer the
 	 * oldest (sometimes second oldest) is discarded.
 	 */
-	inline bool publish(const char *eventName, const char *data, int ttl, PublishFlags flags1, PublishFlags flags2 = PublishFlags()) {
-		return publishCommon(eventName, data, ttl, flags1, flags2);
+	inline bool publishRam(const char *eventName, const char *data, PublishFlags flags1) {
+		return publishCommon(eventName, data, 60, flags1, PublishFlags(), false);
 	}
 
 	/**
-	 * @brief Common publish function. All other overloads lead here. This is a pure virtual function, implemented in subclasses.
+	 * @brief Overload for publishing an event to the file system
 	 *
 	 * @param eventName The name of the event (63 character maximum).
 	 *
@@ -205,7 +205,33 @@ public:
 	 * This function almost always returns true. If you queue more events than fit in the buffer the
 	 * oldest (sometimes second oldest) is discarded.
 	 */
-	virtual bool publishCommon(const char *eventName, const char *data, int ttl, PublishFlags flags1, PublishFlags flags2 = PublishFlags());
+	inline bool publishFs(const char *eventName, const char *data, PublishFlags flags1) {
+		return publishCommon(eventName, data, 60, flags1, PublishFlags(), true);
+	}
+
+	/**
+	 * @brief Common publish function. All other overloads lead here. This is a pure virtual function, implemented in subclasses.
+	 *
+	 * @param eventName The name of the event (63 character maximum).
+	 *
+	 * @param data The event data (255 bytes maximum, 622 bytes in system firmware 0.8.0-rc.4 and later).
+	 *
+	 * @param ttl The time-to-live value. If not specified in one of the other overloads, the value 60 is
+	 * used. However, the ttl is ignored by the cloud, so it doesn't matter what you set it to. Essentially
+	 * all events are discarded immediately if not subscribed to so they essentially have a ttl of 0.
+	 *
+	 * @param flags1 Normally PRIVATE. You can also use PUBLIC, but one or the other must be specified.
+	 *
+	 * @param flags2 (optional) You can use NO_ACK or WITH_ACK if desired.
+     * 
+     * @param ram_fs true = filesystem write, false = ram write
+	 *
+	 * @return true if the event was queued or false if it was not.
+	 *
+	 * This function almost always returns true. If you queue more events than fit in the buffer the
+	 * oldest (sometimes second oldest) is discarded.
+	 */
+	virtual bool publishCommon(const char *eventName, const char *data, int ttl, PublishFlags flags1, PublishFlags flags2 = PublishFlags(), bool ram_fs = false);
 
     /**
      * @brief If there are events in the RAM queue, write them to files in the flash file system
@@ -280,11 +306,6 @@ public:
      * @brief Unlock the queue protection mutex
      */
     void unlock() { os_mutex_recursive_unlock(mutex); };
-
-    /**
-     * @brief Enable / Disable the immediate use of the filesystem to publish events.
-     */
-    void setUseFileSystem(bool mode){useExclusiveFs = mode;};
 
     /**
      * @brief Magic bytes store at the beginning of event files for validity checking
@@ -404,8 +425,6 @@ protected:
     static void systemEventHandler(system_event_t event, int param); //!< system event handler, used to detect reset events
 
     static PublishQueuePosix *_instance; //!< singleton instance of this class
-
-    bool useExclusiveFs = false;    //!< Flag to enable file system publishing 
 };
 
 #endif /* __PUBLISHQUEUEPOSIXRK_H */

@@ -66,7 +66,7 @@ void PublishQueuePosix::loop() {
     }
 }
 
-bool PublishQueuePosix::publishCommon(const char *eventName, const char *eventData, int ttl, PublishFlags flags1, PublishFlags flags2) {
+bool PublishQueuePosix::publishCommon(const char *eventName, const char *eventData, int ttl, PublishFlags flags1, PublishFlags flags2, bool ram_fs) {
 
     PublishQueueEvent *event = newRamEvent(eventName, eventData, flags1 | flags2);
     if (event == NULL)
@@ -78,7 +78,7 @@ bool PublishQueuePosix::publishCommon(const char *eventName, const char *eventDa
 
     WITH_LOCK(*this)
     {
-        if(useExclusiveFs == false)
+        if(ram_fs == false)
         {
             ramQueue.push_back(event);
 

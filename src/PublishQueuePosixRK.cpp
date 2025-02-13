@@ -10,6 +10,9 @@ PublishQueuePosix *PublishQueuePosix::_instance;
 
 static Logger _log("app.pubq");
 
+/**
+ * @brief 
+ */
 PublishQueuePosix &PublishQueuePosix::instance() {
     if (!_instance) {
         _instance = new PublishQueuePosix();
@@ -17,27 +20,35 @@ PublishQueuePosix &PublishQueuePosix::instance() {
     return *_instance;
 }
 
+/**
+ * @brief 
+ */
 PublishQueuePosix &PublishQueuePosix::withRamQueueSize(size_t size) { 
     ramQueueSize = size;
 
     if (stateHandler) {
         _log.trace("withRamQueueSize(%u)", ramQueueSize);
-        checkQueueLimits();
+        checkRamQueueLimits();
     }
     return *this; 
 }
 
-
+/**
+ * @brief 
+ */
 PublishQueuePosix &PublishQueuePosix::withFileQueueSize(size_t size) {
     fileQueueSize = size; 
 
     if (stateHandler) {
         _log.trace("withFileQueueSize(%u)", fileQueueSize);
-        checkQueueLimits();
+        checkFileQueueLimits();
     }
     return *this; 
 }
 
+/**
+ * @brief 
+ */
 void PublishQueuePosix::setup(TimedLock *ParticlePublishLock) {
     if (system_thread_get_state(nullptr) != spark::feature::ENABLED) {
         _log.error("SYSTEM_THREAD(ENABLED) is required");
@@ -55,70 +66,75 @@ void PublishQueuePosix::setup(TimedLock *ParticlePublishLock) {
 
     fileQueue.scanDir();
 
-    checkQueueLimits();
+    checkRamQueueLimits();
+    checkFileQueueLimits();
 
     stateHandler = &PublishQueuePosix::stateConnectWait;
 }
 
+/**
+ * @brief 
+ */
 void PublishQueuePosix::loop() {
     if (stateHandler) {
         stateHandler(*this);
     }
 }
 
-bool PublishQueuePosix::publishCommon(const char *eventName, const char *eventData, int ttl, PublishFlags flags1, PublishFlags flags2, bool ram_fs) {
+/**
+ * @brief 
+ */
+bool PublishQueuePosix::publishCommon(const char *eventName, const char *eventData, int ttl, PublishFlags flags1, PublishFlags flags2, bool ram_fs)
+{
+    bool bStatus = true;    // Pass
 
-    PublishQueueEvent *event = newRamEvent(eventName, eventData, flags1 | flags2);
-    if (event == NULL)
+    if(ram_fs == false)
     {
-        return false;
-    }
-    
-    _log.trace("publishCommon eventName=%s eventData=%s", eventName, eventData ? eventData : "");
-
-    WITH_LOCK(*this)
-    {
-        if(ram_fs == false)
+        PublishQueueEvent *event = newEvent(eventName, eventData, flags1 | flags2);
+        if (event != NULL)
         {
-            ramQueue.push_back(event);
-
-            _log.trace("fileQueueLen=%u ramQueueLen=%u connected=%d", fileQueue.getQueueLen(), ramQueue.size(), Particle.connected());
-
-            if (fileQueue.getQueueLen() == 0 && (ramQueue.size() <= ramQueueSize) && Particle.connected())
+            WITH_LOCK(*this)
             {
-                // No files in the disk-based queue, RAM-based queue is not full, and we are cloud connected
-                // Leave the event in the RAM queue and return true
-                _log.trace("queued to ramQueue");
-            }
-            else
-            {
-                // We need to move the queue to the file system
-                writeQueueToFiles();
+                _log.trace("publishCommon eventName=%s eventData=%s", eventName, eventData ? eventData : "");
+
+                // Place event to RAM queue
+                ramQueue.push_back(event);
+
+                _log.trace("fileQueueLen=%u ramQueueLen=%u connected=%d", fileQueue.getQueueLen(), ramQueue.size(), Particle.connected());
+
+                if (fileQueue.getQueueLen() == 0 && (ramQueue.size() <= ramQueueSize) && Particle.connected())
+                {
+                    // No files in the disk-based queue, RAM-based queue is not full, and we are cloud connected
+                    // Leave the event in the RAM queue and return true
+                    _log.trace("queued to ramQueue");
+                }
+                else
+                {
+                    // Ram queue is full so just send out a notification instead.
+                    _log.trace("Failed to write event to ramQueue");
+                    bStatus = false;
+                }
+                bStatus = checkRamQueueLimits();
             }
         }
         else
         {
-            if((ramQueue.size() <= ramQueueSize))
-            {
-                // Use ram queue as container that writeQueueToFiles uses
-                ramQueue.push_back(event);
-
-                // We need to move the queue to the file system
-                writeQueueToFiles();
-            }
-            else
-            {
-                _log.trace("queued to ramQueue");
-            }
+            bStatus = false;
         }
-        checkQueueLimits();
+    }
+    else
+    {
+        // We need to record the event to the file system
+        writeEventToFile(eventName, eventData, flags1 | flags2);
     }
 
-
-    return true;
+    return bStatus;
 }
 
-PublishQueueEvent *PublishQueuePosix::newRamEvent(const char *eventName, const char *eventData, PublishFlags flags) {
+/**
+ * @brief 
+ */
+PublishQueueEvent *PublishQueuePosix::newEvent(const char *eventName, const char *eventData, PublishFlags flags) {
 
     if (!eventData) {
         eventData = "";
@@ -141,6 +157,9 @@ PublishQueueEvent *PublishQueuePosix::newRamEvent(const char *eventName, const c
     return event;
 }
 
+/**
+ * @brief 
+ */
 void PublishQueuePosix::writeQueueToFiles() {
 
     WITH_LOCK(*this) {
@@ -172,7 +191,43 @@ void PublishQueuePosix::writeQueueToFiles() {
     }
 }
 
+/**
+ * @brief 
+ */
+void PublishQueuePosix::writeEventToFile(const char *eventName, const char *eventData, PublishFlags flags)
+{
+    WITH_LOCK(*this)
+    {
+        PublishQueueEvent *event;
 
+        event = newEvent(eventName, eventData, flags);
+        if(event != NULL)
+        {
+            int fileNum = fileQueue.reserveFile();
+
+            int fd = open(fileQueue.getPathForFileNum(fileNum), O_RDWR | O_CREAT);
+            if (fd) {
+                PublishQueueFileHeader hdr;
+                hdr.magic = FILE_MAGIC;
+                hdr.version = FILE_VERSION;
+                hdr.headerSize = sizeof(PublishQueueFileHeader);
+                hdr.nameLen = sizeof(PublishQueueEvent::eventName);
+                write(fd, &hdr, sizeof(hdr));
+
+                write(fd, event, sizeof(PublishQueueEvent) + strlen(event->eventData));
+                close(fd);
+
+                // This message is monitored by the automated test tool. If you edit this, change that too.
+                _log.trace("writeQueueToFiles fileNum=%d", fileNum);
+            }
+            fileQueue.addFileToQueue(fileNum);
+        }
+    }
+}
+
+/**
+ * @brief
+ */
 PublishQueueEvent *PublishQueuePosix::readQueueFile(int fileNum) {
     PublishQueueEvent *result = NULL;
 
@@ -218,6 +273,9 @@ PublishQueueEvent *PublishQueuePosix::readQueueFile(int fileNum) {
     return result;
 }
 
+/**
+ * @brief 
+ */
 void PublishQueuePosix::clearQueues() {
     WITH_LOCK(*this) {
         while(!ramQueue.empty()) {
@@ -232,7 +290,9 @@ void PublishQueuePosix::clearQueues() {
 
     _log.trace("clearQueues");
 }
-
+/**
+ * @brief 
+ */
 void PublishQueuePosix::setPausePublishing(bool value) { 
     pausePublishing = value; 
 
@@ -244,25 +304,42 @@ void PublishQueuePosix::setPausePublishing(bool value) {
     }
 }
 
-
-
-void PublishQueuePosix::checkQueueLimits() {
+/**
+ * @brief 
+ */
+bool PublishQueuePosix::checkRamQueueLimits()
+{   bool bStatus = true;
     WITH_LOCK(*this) {
         if (ramQueue.size() > ramQueueSize) {
             // RAM queue is too large, move all to files
-            writeQueueToFiles();
+            _log.info("RAM queue is too large");
+            bStatus = false;
         }
+    }
+    return bStatus;
+}
 
+/**
+ * @brief 
+ */
+bool PublishQueuePosix::checkFileQueueLimits() {
+    bool bStatus  = true;
+    WITH_LOCK(*this) {
         while(fileQueue.getQueueLen() > (int)fileQueueSize) {
             int fileNum = fileQueue.getFileFromQueue(true);
             if (fileNum) {
                 fileQueue.removeFileNum(fileNum, false);
                 _log.info("discarded event %d", fileNum);
+                bStatus = false;
             }
         }
     }
+    return bStatus;
 }
 
+/**
+ * @brief 
+ */
 size_t PublishQueuePosix::getNumEvents() {
     size_t result = 0;
 
@@ -284,12 +361,17 @@ size_t PublishQueuePosix::getNumEvents() {
     return result;
 }
 
+/**
+ * @brief 
+ */
 void PublishQueuePosix::publishCompleteCallback(bool succeeded, const char *eventName, const char *eventData) {
     publishComplete = true;
     publishSuccess = succeeded;
 }
 
-
+/**
+ * @brief 
+ */
 void PublishQueuePosix::stateConnectWait() {
     canSleep = (pausePublishing || getNumEvents() == 0);
 
@@ -300,7 +382,9 @@ void PublishQueuePosix::stateConnectWait() {
     }
 }
 
-
+/**
+ * @brief 
+ */
 void PublishQueuePosix::stateWait() {
     if (!Particle.connected()) {
         stateHandler = &PublishQueuePosix::stateConnectWait;
@@ -359,6 +443,10 @@ void PublishQueuePosix::stateWait() {
         canSleep = true;
     }
 }
+
+/**
+ * @brief 
+ */
 void PublishQueuePosix::statePublishWait() {
     if (!publishComplete) {
         return;
@@ -401,7 +489,7 @@ void PublishQueuePosix::statePublishWait() {
             }
             // Then write the entire queue to files
             _log.trace("writing to files after publish failure");
-            writeQueueToFiles();
+            //writeQueueToFiles();
         }
     }
 
@@ -409,15 +497,23 @@ void PublishQueuePosix::statePublishWait() {
     stateTime = millis();
 }
 
-
+/**
+ * @brief 
+ */
 PublishQueuePosix::PublishQueuePosix() {
     fileQueue.withDirPath("/usr/pubqueue");
 }
 
+/**
+ * @brief 
+ */
 PublishQueuePosix::~PublishQueuePosix() {
 
 }
 
+/**
+ * @brief 
+ */
 void PublishQueuePosix::systemEventHandler(system_event_t event, int param) {
     if ((event == reset) || ((event == cloud_status) && (param == cloud_status_disconnecting))) {
         _log.trace("reset or disconnect event, save files to queue");

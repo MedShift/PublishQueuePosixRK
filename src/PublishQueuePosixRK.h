@@ -234,6 +234,11 @@ public:
 	virtual bool publishCommon(const char *eventName, const char *data, int ttl, PublishFlags flags1, PublishFlags flags2 = PublishFlags(), bool ram_fs = false);
 
     /**
+     * @brief Write the current event to the file system
+     */
+    void writeEventToFile(const char *eventName, const char *eventData, PublishFlags flags1);
+
+    /**
      * @brief If there are events in the RAM queue, write them to files in the flash file system
      */
     void writeQueueToFiles();
@@ -285,9 +290,19 @@ public:
     /**
      * @brief Check the queue limit, discarding events as necessary
      * 
-     * When the RAM queue exceeds the limit, all events are moved into files. 
+     * When the RAM queue exceeds the limit, returns a fail as the new paradigm
+     * is to not move Ram queue events to the file system.
+     * @return true for queue not full
      */
-    void checkQueueLimits();
+    bool checkRamQueueLimits();
+
+    /**
+     * @brief Check the queue limit, moving events as necessary
+     * 
+     * When the file queue exceeds the limit, all events are moved into files.
+     * @return true if successfully moved file queue to file system.
+     */
+    bool checkFileQueueLimits();
     
     /**
      * @brief Lock the queue protection mutex
@@ -353,7 +368,7 @@ protected:
      * 
      * You must delete the result from this method when you are done using it. 
      */
-    PublishQueueEvent *newRamEvent(const char *eventName, const char *eventData, PublishFlags flags);
+    PublishQueueEvent *newEvent(const char *eventName, const char *eventData, PublishFlags flags);
 
     /**
      * @brief Read an event from a sequentially numbered file 

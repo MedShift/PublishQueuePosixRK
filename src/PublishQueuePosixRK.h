@@ -236,7 +236,7 @@ public:
     /**
      * @brief Write the current event to the file system
      */
-    void writeEventToFile(const char *eventName, const char *eventData, PublishFlags flags1);
+    bool writeEventToFile(PublishQueueEvent *event);
 
     /**
      * @brief If there are events in the RAM queue, write them to files in the flash file system

@@ -186,6 +186,7 @@ void PublishQueuePosix::writeQueueToFiles() {
                 // This message is monitored by the automated test tool. If you edit this, change that too.
                 _log.trace("writeQueueToFiles fileNum=%d", fileNum);
             }
+            
             fileQueue.addFileToQueue(fileNum);
 
             delete event;
@@ -206,7 +207,8 @@ bool PublishQueuePosix::writeEventToFile(PublishQueueEvent *event)
             int fileNum = fileQueue.reserveFile();
 
             int fd = open(fileQueue.getPathForFileNum(fileNum), O_RDWR | O_CREAT);
-            if (fd) {
+            if (fd)
+            {
                 PublishQueueFileHeader hdr;
                 hdr.magic = FILE_MAGIC;
                 hdr.version = FILE_VERSION;
@@ -218,13 +220,13 @@ bool PublishQueuePosix::writeEventToFile(PublishQueueEvent *event)
                 close(fd);
 
                 // This message is monitored by the automated test tool. If you edit this, change that too.
-                _log.trace("writeQueueToFiles fileNum=%d", fileNum);
+                _log.trace("addFileToQueue fileNum=%d", fileNum);
+                fileQueue.addFileToQueue(fileNum);
             }
             else
             {
                 bStatus = false;
             }
-            fileQueue.addFileToQueue(fileNum);
         }
         else
         {

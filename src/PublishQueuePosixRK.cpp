@@ -10,7 +10,9 @@ PublishQueuePosix *PublishQueuePosix::_instance;
 
 static Logger _log("app.pubq");
 
-
+/**
+ * @brief Method to return the singleton instance
+ */
 PublishQueuePosix &PublishQueuePosix::instance() {
     if (!_instance) {
         _instance = new PublishQueuePosix();
@@ -18,27 +20,35 @@ PublishQueuePosix &PublishQueuePosix::instance() {
     return *_instance;
 }
 
+/**
+ * @brief RAM queue maintenance method
+ */
 PublishQueuePosix &PublishQueuePosix::withRamQueueSize(size_t size) { 
     ramQueueSize = size;
 
     if (stateHandler) {
         _log.trace("withRamQueueSize(%u)", ramQueueSize);
-        checkQueueLimits();
+        checkRamQueueLimits();
     }
     return *this; 
 }
 
-
+/**
+ * @brief File queue maintneance method
+ */
 PublishQueuePosix &PublishQueuePosix::withFileQueueSize(size_t size) {
     fileQueueSize = size; 
 
     if (stateHandler) {
         _log.trace("withFileQueueSize(%u)", fileQueueSize);
-        checkQueueLimits();
+        checkFileQueueLimits();
     }
     return *this; 
 }
 
+/**
+ * @brief setup method for this submodule
+ */
 void PublishQueuePosix::setup(TimedLock *ParticlePublishLock) {
     if (system_thread_get_state(nullptr) != spark::feature::ENABLED) {
         _log.error("SYSTEM_THREAD(ENABLED) is required");
@@ -56,59 +66,90 @@ void PublishQueuePosix::setup(TimedLock *ParticlePublishLock) {
 
     fileQueue.scanDir();
 
-    checkQueueLimits();
+    checkFileQueueLimits();
 
     stateHandler = &PublishQueuePosix::stateConnectWait;
 }
 
+/**
+ * @brief loopp function for this submodule
+ */
 void PublishQueuePosix::loop() {
     if (stateHandler) {
         stateHandler(*this);
     }
 }
 
-bool PublishQueuePosix::publishCommon(const char *eventName, const char *eventData, int ttl, PublishFlags flags1, PublishFlags flags2) {
-
-    PublishQueueEvent *event = newRamEvent(eventName, eventData, flags1 | flags2);
-    if (!event) {
-        return false;
-    }
+/**
+ * @brief Common event publish method
+ */
+bool PublishQueuePosix::publishCommon(const char *eventName, const char *eventData, int ttl, PublishFlags flags1, PublishFlags flags2, bool ram_fs)
+{
+    bool bStatus = true;    // Pass
+                    
     _log.trace("publishCommon eventName=%s eventData=%s", eventName, eventData ? eventData : "");
 
-    WITH_LOCK(*this) {
-        ramQueue.push_back(event);
+    PublishQueueEvent *event = newEvent(eventName, eventData, flags1 | flags2);
+    if (event != NULL)
+    {
+        if(ram_fs == false)
+        {
+            WITH_LOCK(*this)
+            {
+                _log.trace("ramQueueLen=%u connected=%d", fileQueue.getQueueLen(), ramQueue.size(), Particle.connected());
 
-        _log.trace("fileQueueLen=%u ramQueueLen=%u connected=%d", fileQueue.getQueueLen(), ramQueue.size(), Particle.connected());
+                bStatus = checkRamQueueLimits();
 
-        if (fileQueue.getQueueLen() == 0 && (ramQueue.size() <= ramQueueSize) && Particle.connected()) {
-            // No files in the disk-based queue, RAM-based queue is not full, and we are cloud connected
-            // Leave the event in the RAM queue and return true
-            _log.trace("queued to ramQueue");
+                if ((bStatus == true) && Particle.connected())
+                {
+                    // RAM-based queue is not full, and we are cloud connected
+                    // Leave the event in the RAM queue and return true
+
+                    // Place event to RAM queue
+                    ramQueue.push_back(event);
+
+                    _log.trace("queued to ramQueue");
+                }
+                else
+                {
+                    // Ram queue is full so just send out a notification instead.
+                    _log.trace("Failed to write event to ramQueue");
+                    bStatus = false;
+                }
+            }
         }
-        else {
-            // We need to move the queue to the file system
-            writeQueueToFiles();
+        else
+        {
+            // We need to record the event to the file system
+            bStatus = writeEventToFile(event);
         }
-        checkQueueLimits();
     }
-
-
-    return true;
+    else
+    {
+        bStatus = false;
+    }
+    return bStatus;
 }
 
-PublishQueueEvent *PublishQueuePosix::newRamEvent(const char *eventName, const char *eventData, PublishFlags flags) {
+/**
+ * @brief Create and format the current event
+ */
+PublishQueueEvent *PublishQueuePosix::newEvent(const char *eventName, const char *eventData, PublishFlags flags) {
 
-    if (!eventData) {
+    if (!eventData)
+    {
         eventData = "";
     }
+
     if (strlen(eventName) > particle::protocol::MAX_EVENT_NAME_LENGTH) {
         return NULL;
     }
+
     if (strlen(eventData) > particle::protocol::MAX_EVENT_DATA_LENGTH) {
         return NULL;
     }
 
-    PublishQueueEvent *event;
+    PublishQueueEvent *event = NULL;
 
     event = (PublishQueueEvent *) new char[sizeof(PublishQueueEvent) + strlen(eventData)];
     if (event) {
@@ -119,6 +160,9 @@ PublishQueueEvent *PublishQueuePosix::newRamEvent(const char *eventName, const c
     return event;
 }
 
+/**
+ * @brief 
+ */
 void PublishQueuePosix::writeQueueToFiles() {
 
     WITH_LOCK(*this) {
@@ -143,6 +187,7 @@ void PublishQueuePosix::writeQueueToFiles() {
                 // This message is monitored by the automated test tool. If you edit this, change that too.
                 _log.trace("writeQueueToFiles fileNum=%d", fileNum);
             }
+            
             fileQueue.addFileToQueue(fileNum);
 
             delete event;
@@ -150,7 +195,52 @@ void PublishQueuePosix::writeQueueToFiles() {
     }
 }
 
+/**
+ * @brief Writes the current event to the Posix file system
+ */
+bool PublishQueuePosix::writeEventToFile(PublishQueueEvent *event)
+{
+    bool bStatus = true;
 
+    if(event != NULL)
+    {
+        WITH_LOCK(*this)
+        {
+            int fileNum = fileQueue.reserveFile();
+
+            int fd = open(fileQueue.getPathForFileNum(fileNum), O_RDWR | O_CREAT);
+            if (fd)
+            {
+                PublishQueueFileHeader hdr;
+                hdr.magic = FILE_MAGIC;
+                hdr.version = FILE_VERSION;
+                hdr.headerSize = sizeof(PublishQueueFileHeader);
+                hdr.nameLen = sizeof(PublishQueueEvent::eventName);
+                write(fd, &hdr, sizeof(hdr));
+
+                write(fd, event, sizeof(PublishQueueEvent) + strlen(event->eventData));
+                close(fd);
+
+                // This message is monitored by the automated test tool. If you edit this, change that too.
+                _log.trace("addFileToQueue fileNum=%d", fileNum);
+                fileQueue.addFileToQueue(fileNum);
+            }
+            else
+            {
+                bStatus = false;
+            }
+        }
+    }
+    else
+    {
+        bStatus = false;
+    }
+    return bStatus;
+}
+
+/**
+ * @brief Method to read the file system 
+ */
 PublishQueueEvent *PublishQueuePosix::readQueueFile(int fileNum) {
     PublishQueueEvent *result = NULL;
 
@@ -196,6 +286,9 @@ PublishQueueEvent *PublishQueuePosix::readQueueFile(int fileNum) {
     return result;
 }
 
+/**
+ * @brief Method to clear the RAM and File queues
+ */
 void PublishQueuePosix::clearQueues() {
     WITH_LOCK(*this) {
         while(!ramQueue.empty()) {
@@ -211,6 +304,9 @@ void PublishQueuePosix::clearQueues() {
     _log.trace("clearQueues");
 }
 
+/**
+ * @brief State to pause publishing
+ */
 void PublishQueuePosix::setPausePublishing(bool value) { 
     pausePublishing = value; 
 
@@ -222,25 +318,42 @@ void PublishQueuePosix::setPausePublishing(bool value) {
     }
 }
 
-
-
-void PublishQueuePosix::checkQueueLimits() {
+/**
+ * @brief Checks the RAM queue for being full or not
+ */
+bool PublishQueuePosix::checkRamQueueLimits()
+{   bool bStatus = true;
     WITH_LOCK(*this) {
         if (ramQueue.size() > ramQueueSize) {
-            // RAM queue is too large, move all to files
-            writeQueueToFiles();
+            // RAM queue is too full, signal failure
+            _log.info("RAM queue is too large");
+            bStatus = false;
         }
+    }
+    return bStatus;
+}
 
+/**
+ * @brief Checks the File queue for full or not and removes one file if full.
+ */
+bool PublishQueuePosix::checkFileQueueLimits() {
+    bool bStatus  = true;
+    WITH_LOCK(*this) {
         while(fileQueue.getQueueLen() > (int)fileQueueSize) {
             int fileNum = fileQueue.getFileFromQueue(true);
             if (fileNum) {
                 fileQueue.removeFileNum(fileNum, false);
                 _log.info("discarded event %d", fileNum);
+                bStatus = false;
             }
         }
     }
+    return bStatus;
 }
 
+/**
+ * @brief Retrieves the number of events
+ */
 size_t PublishQueuePosix::getNumEvents() {
     size_t result = 0;
 
@@ -262,12 +375,17 @@ size_t PublishQueuePosix::getNumEvents() {
     return result;
 }
 
+/**
+ * @brief Callback fired when a publish event completes
+ */
 void PublishQueuePosix::publishCompleteCallback(bool succeeded, const char *eventName, const char *eventData) {
     publishComplete = true;
     publishSuccess = succeeded;
 }
 
-
+/**
+ * @brief State for waiting for a particale connection
+ */
 void PublishQueuePosix::stateConnectWait() {
     canSleep = (pausePublishing || getNumEvents() == 0);
 
@@ -278,7 +396,9 @@ void PublishQueuePosix::stateConnectWait() {
     }
 }
 
-
+/**
+ * @brief Wait state
+ */
 void PublishQueuePosix::stateWait() {
     if (!Particle.connected()) {
         stateHandler = &PublishQueuePosix::stateConnectWait;
@@ -337,6 +457,10 @@ void PublishQueuePosix::stateWait() {
         canSleep = true;
     }
 }
+
+/**
+ * @brief Wait for publish to complete
+ */
 void PublishQueuePosix::statePublishWait() {
     if (!publishComplete) {
         return;
@@ -379,7 +503,7 @@ void PublishQueuePosix::statePublishWait() {
             }
             // Then write the entire queue to files
             _log.trace("writing to files after publish failure");
-            writeQueueToFiles();
+            //writeQueueToFiles();
         }
     }
 
@@ -387,15 +511,23 @@ void PublishQueuePosix::statePublishWait() {
     stateTime = millis();
 }
 
-
+/**
+ * @brief Publish current file queue entry to file system
+ */
 PublishQueuePosix::PublishQueuePosix() {
     fileQueue.withDirPath("/usr/pubqueue");
 }
 
+/**
+ * @brief submodule destructor
+ */
 PublishQueuePosix::~PublishQueuePosix() {
 
 }
 
+/**
+ * @brief System reset handler
+ */
 void PublishQueuePosix::systemEventHandler(system_event_t event, int param) {
     if ((event == reset) || ((event == cloud_status) && (param == cloud_status_disconnecting))) {
         _log.trace("reset or disconnect event, save files to queue");

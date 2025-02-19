@@ -98,7 +98,9 @@ bool PublishQueuePosix::publishCommon(const char *eventName, const char *eventDa
             {
                 _log.trace("ramQueueLen=%u connected=%d", fileQueue.getQueueLen(), ramQueue.size(), Particle.connected());
 
-                if ((ramQueue.size() <= ramQueueSize) && Particle.connected())
+                bStatus = checkRamQueueLimits();
+
+                if ((bStatus == true) && Particle.connected())
                 {
                     // RAM-based queue is not full, and we are cloud connected
                     // Leave the event in the RAM queue and return true
@@ -114,7 +116,6 @@ bool PublishQueuePosix::publishCommon(const char *eventName, const char *eventDa
                     _log.trace("Failed to write event to ramQueue");
                     bStatus = false;
                 }
-                bStatus = checkRamQueueLimits();
             }
         }
         else
@@ -200,9 +201,10 @@ void PublishQueuePosix::writeQueueToFiles() {
 bool PublishQueuePosix::writeEventToFile(PublishQueueEvent *event)
 {
     bool bStatus = true;
-    WITH_LOCK(*this)
+
+    if(event != NULL)
     {
-        if(event != NULL)
+        WITH_LOCK(*this)
         {
             int fileNum = fileQueue.reserveFile();
 
@@ -228,10 +230,10 @@ bool PublishQueuePosix::writeEventToFile(PublishQueueEvent *event)
                 bStatus = false;
             }
         }
-        else
-        {
-            bStatus = false;
-        }
+    }
+    else
+    {
+        bStatus = false;
     }
     return bStatus;
 }

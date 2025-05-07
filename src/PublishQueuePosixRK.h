@@ -435,6 +435,7 @@ protected:
     bool publishSuccess = false; //!< true if the publish succeeded
     bool pausePublishing = false; //!< flag to pause publishing (used from automated test)
     bool canSleep = false; //!< returns true if this is a good time to go to sleep
+    bool bRAMSource = true;   // Source is ram queue if true
 
     unsigned long waitAfterConnect = 2000; //!< time to wait after Particle.connected() before publishing
     unsigned long waitBetweenPublish = 1000; //!< how long to wait in milliseconds between publishes

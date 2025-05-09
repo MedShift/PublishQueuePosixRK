@@ -22,13 +22,14 @@ PublishQueuePosix &PublishQueuePosix::instance() {
 
 /**
  * @brief RAM queue maintenance method
+ * @returns reference to a PublishQueuePosix object
  */
 PublishQueuePosix &PublishQueuePosix::withRamQueueSize(size_t size) { 
     ramQueueSize = size;
 
     if (stateHandler) {
         _log.trace("withRamQueueSize(%u)", ramQueueSize);
-        checkRamQueueLimits();
+        checkRamQueueLimits();  // Only provides a log output. Performs no work
     }
     return *this; 
 }
@@ -58,7 +59,7 @@ void PublishQueuePosix::setup(TimedLock *ParticlePublishLock) {
     os_mutex_recursive_create(&mutex);
 
     // Register a system reset handler
-    System.on(reset | cloud_status, systemEventHandler);
+    //System.on(reset | cloud_status, systemEventHandler);
 
     // Start the background publish thread
     BackgroundPublishRK::instance().setup(ParticlePublishLock);
@@ -72,7 +73,7 @@ void PublishQueuePosix::setup(TimedLock *ParticlePublishLock) {
 }
 
 /**
- * @brief loopp function for this submodule
+ * @brief loop function for this submodule
  */
 void PublishQueuePosix::loop() {
     if (stateHandler) {
@@ -100,7 +101,7 @@ bool PublishQueuePosix::publishCommon(const char *eventName, const char *eventDa
 
                 bStatus = checkRamQueueLimits();
 
-                if ((bStatus == true) && Particle.connected())
+                if (bStatus == true)
                 {
                     // RAM-based queue is not full, and we are cloud connected
                     // Leave the event in the RAM queue and return true
@@ -161,7 +162,7 @@ PublishQueueEvent *PublishQueuePosix::newEvent(const char *eventName, const char
 }
 
 /**
- * @brief 
+ * @brief Writes ramQueue to the POSIX file system on the MSOM Flash memory
  */
 void PublishQueuePosix::writeQueueToFiles() {
 
@@ -320,6 +321,7 @@ void PublishQueuePosix::setPausePublishing(bool value) {
 
 /**
  * @brief Checks the RAM queue for being full or not
+ * @returns true if ram queue is not full, false if it is full
  */
 bool PublishQueuePosix::checkRamQueueLimits()
 {   bool bStatus = true;
@@ -335,6 +337,7 @@ bool PublishQueuePosix::checkRamQueueLimits()
 
 /**
  * @brief Checks the File queue for full or not and removes one file if full.
+ * @returns true if file queue is not full, false if it is full
  */
 bool PublishQueuePosix::checkFileQueueLimits() {
     bool bStatus  = true;
@@ -352,7 +355,7 @@ bool PublishQueuePosix::checkFileQueueLimits() {
 }
 
 /**
- * @brief Retrieves the number of events
+ * @brief Retrieves the number of events (from ramQueue)
  */
 size_t PublishQueuePosix::getNumEvents() {
     size_t result = 0;
@@ -384,7 +387,7 @@ void PublishQueuePosix::publishCompleteCallback(bool succeeded, const char *even
 }
 
 /**
- * @brief State for waiting for a particale connection
+ * @brief State for waiting for a particle connection
  */
 void PublishQueuePosix::stateConnectWait() {
     canSleep = (pausePublishing || getNumEvents() == 0);
@@ -414,27 +417,27 @@ void PublishQueuePosix::stateWait() {
         canSleep = (getNumEvents() == 0);
         return;
     }
-    
-    curFileNum = fileQueue.getFileFromQueue(false);
-    if (curFileNum) {
-        curEvent = readQueueFile(curFileNum);
-        if (!curEvent) {
-            // Probably a corrupted file, discard
-            _log.info("discarding corrupted file %d", curFileNum);
-            fileQueue.getFileFromQueue(true);
-            fileQueue.removeFileNum(curFileNum, false);
-        }
+
+    if (!ramQueue.empty()) {
+        curEvent = ramQueue.front();
+        ramQueue.pop_front();
     }
     else {
-        if (!ramQueue.empty()) {
-            curEvent = ramQueue.front();
-            ramQueue.pop_front();
+        curFileNum = fileQueue.getFileFromQueue(false);
+        if (curFileNum) {
+            curEvent = readQueueFile(curFileNum);
+            if (!curEvent) {
+                // Probably a corrupted file, discard
+                _log.info("discarding corrupted file %d", curFileNum);
+                fileQueue.getFileFromQueue(true);
+                fileQueue.removeFileNum(curFileNum, false);
+            }
         }
         else {
             curEvent = NULL;
         }
     }
-
+    
     if (curEvent) {
         stateTime = millis();
         stateHandler = &PublishQueuePosix::statePublishWait;
@@ -503,6 +506,7 @@ void PublishQueuePosix::statePublishWait() {
             }
             // Then write the entire queue to files
             _log.trace("writing to files after publish failure");
+            //_log.trace("writing to files after publish failure");
             //writeQueueToFiles();
         }
     }

@@ -11,6 +11,51 @@
 #include <deque>
 
 /**
+ * @enum EventSourceDest
+ * @brief Where the event is to be stored or was pulled from depending on the current activity.
+ */
+typedef enum EventSourceDest : uint8_t {
+    /**
+     * @brief Event pulled from or destined to the ramQueue.
+     * @note Used for fire and forget type events.
+     */
+    ram,
+    /**
+     * @brief Event pulled from or destined to the MCU flash POSIX filesystem.
+     */
+    flash,
+    /**
+     * @brief Event pulled from or destined to the SD filesystem.
+     * @note Used for high priority events requiring future retrieval.
+     */
+    fs
+} EventSourceDest_t;
+
+/**
+ * @enum EventPriority
+ * @brief Determines whether or not an event can be lost due to resets of various reasons.
+ * @details Currently low priority events will not survive an interruption whereas medium and high priority events will.
+ * The destination of medium and high priority events can be arbitrarily stored in the flash POSIX or SD filesystem.
+ */
+typedef enum EventPriority : uint8_t {
+    /**
+     * @brief Event has a low priority and it isn't necessary to retain over powerdown / reset.
+     * @note Only stored in MCU RAM queue as the value of the information doesn't have context past a powerdown / reset event.
+     */
+    low,
+    /**
+     * @brief Event has a medium priority and it is necessary to retain over powerdown / reset.
+     * @note Stored in MCU POSIX flash filesystem requiring future retrieval.
+     */
+    medium,
+    /**
+     * @brief Event has a low priority and it is necessary to retain over powerdown / reset.
+     * @note Stored in SD device file system requiring future retrieval.
+     */
+    high
+} EventPriority_t;
+
+/**
  * @brief Structure stored before the event data in files on the flash file system
  * 
  * Each file is sequentially numbered and has one event. The contents of the file
@@ -27,7 +72,7 @@ struct PublishQueueFileHeader {
 /**
  * @brief Structure to hold an event in RAM or in files
  * 
- * In RAM, this structure is stored in the ramQueue. 
+ * @details RAM, this structure is stored in the ramQueue. 
  * 
  * On the flash file system, each file contains one event and consists of the
  * PublishQueueFileHeader above (8 bytes) plus this structure.
@@ -50,7 +95,7 @@ public:
     /**
      * @brief Gets the singleton instance of this class
      * 
-     * You cannot construct a PublishQueuePosix object as a global variable,
+     * @details cannot construct a PublishQueuePosix object as a global variable,
      * stack variable, or with new. You can only request the singleton instance.
      */
     static PublishQueuePosix &instance();
@@ -60,7 +105,7 @@ public:
      * 
      * @param size The size to set (can be 0, default is 2)
      * 
-     * You can set this to 0 and the events will be stored on the flash
+     * @details can set this to 0 and the events will be stored on the flash
      * file system immediately. This is the best option if the events must
      * not be lost in the event of a sudden reboot. 
      * 
@@ -81,7 +126,7 @@ public:
      * 
      * @param size The maximum number of files to store (one event per file)
      * 
-     * If you exceed this number of events, the oldest event is discarded.
+     * @note If you exceed this number of events, the oldest event is discarded.
      */
     PublishQueuePosix &withFileQueueSize(size_t size);
 
@@ -92,24 +137,24 @@ public:
 
     /**
      * @brief Sets the directory to use as the queue directory. This is required!
-     * 
-     * @param dirPath the pathname, Unix-style with / as the directory separator. 
-     * 
-     * Typically you create your queue either at the top level ("/myqueue") or in /usr
+
+     * @details Typically you create your queue either at the top level ("/myqueue") or in /usr
      * ("/usr/myqueue"). The directory will be created if necessary, however only one
      * level of directory will be created. The parent must already exist.
      * 
      * The dirPath can end with a slash or not, but if you include it, it will be
      * removed.
+     *      * 
+     * @param dirPath the pathname, Unix-style with / as the directory separator. 
      * 
-     * You must call this as you cannot use the root directory as a queue!
+     * @note You must call this as you cannot use the root directory as a queue!
      */
     PublishQueuePosix &withDirPath(const char *dirPath) { fileQueue.withDirPath(dirPath); return *this; };
 
     /**
      * @brief Gets the directory path set using withDirPath()
      * 
-     * The returned path will not end with a slash.
+     * @note The returned path will not end with a slash.
      */
     const char *getDirPath() const { return fileQueue.getDirPath(); };
 
@@ -134,7 +179,7 @@ public:
 	 *
 	 * @return true if the event was queued or false if it was not.
 	 *
-	 * This function almost always returns true. If you queue more events than fit in the buffer the
+	 * @note This function almost always returns true. If you queue more events than fit in the buffer the
 	 * oldest (sometimes second oldest) is discarded.
 	 */
 	inline bool publish(const char *eventName, PublishFlags flags1, PublishFlags flags2 = PublishFlags()) {
@@ -154,7 +199,7 @@ public:
 	 *
 	 * @return true if the event was queued or false if it was not.
 	 *
-	 * This function almost always returns true. If you queue more events than fit in the buffer the
+	 * @note This function almost always returns true. If you queue more events than fit in the buffer the
 	 * oldest (sometimes second oldest) is discarded.
 	 */
 	inline bool publish(const char *eventName, const char *data, PublishFlags flags1, PublishFlags flags2 = PublishFlags()) {
@@ -178,7 +223,7 @@ public:
 	 *
 	 * @return true if the event was queued or false if it was not.
 	 *
-	 * This function almost always returns true. If you queue more events than fit in the buffer the
+	 * @note This function almost always returns true. If you queue more events than fit in the buffer the
 	 * oldest (sometimes second oldest) is discarded.
 	 */
 	inline bool publishRam(const char *eventName, const char *data, PublishFlags flags1) {
@@ -202,7 +247,7 @@ public:
 	 *
 	 * @return true if the event was queued or false if it was not.
 	 *
-	 * This function almost always returns true. If you queue more events than fit in the buffer the
+	 * @note This function almost always returns true. If you queue more events than fit in the buffer the
 	 * oldest (sometimes second oldest) is discarded.
 	 */
 	inline bool publishFs(const char *eventName, const char *data, PublishFlags flags1) {
@@ -228,7 +273,7 @@ public:
 	 *
 	 * @return true if the event was queued or false if it was not.
 	 *
-	 * This function almost always returns true. If you queue more events than fit in the buffer the
+	 * @note This function almost always returns true. If you queue more events than fit in the buffer the
 	 * oldest (sometimes second oldest) is discarded.
 	 */
 	virtual bool publishCommon(const char *eventName, const char *data, int ttl, PublishFlags flags1, PublishFlags flags2 = PublishFlags(), bool ram_fs = false);
@@ -253,7 +298,7 @@ public:
      * 
      * @param value The value to set, true = pause, false = normal operation
      * 
-     * If called while a publish is in progress, that publish will still proceed, but
+     * @details If called while a publish is in progress, that publish will still proceed, but
      * the next event (if any) will not be attempted.
      * 
      * This is used by the automated test tool; you probably won't need to manually
@@ -269,7 +314,7 @@ public:
     /**
      * @brief Determine if it's a good time to go to sleep
      * 
-     * If a publish is not in progress and the queue is empty, returns true. 
+     * @details If a publish is not in progress and the queue is empty, returns true. 
      * 
      * If pausePublishing is true, then return true if either the current publish has
      * completed, or not cloud connected.
@@ -279,7 +324,7 @@ public:
     /**
      * @brief Gets the total number of events queued
      * 
-     * This is the number of events in the RAM-based queue and the file-based
+     * @details This is the number of events in the RAM-based queue and the file-based
      * queue. This operation is fast; the file queue length is stored in RAM,
      * so this command does not need to access the file system.
      * 
@@ -290,7 +335,7 @@ public:
     /**
      * @brief Check the queue limit, discarding events as necessary
      * 
-     * When the RAM queue exceeds the limit, returns a fail as the new paradigm
+     * @details When the RAM queue exceeds the limit, returns a fail as the new paradigm
      * is to not move Ram queue events to the file system.
      * @return true for queue not full
      */
@@ -299,7 +344,7 @@ public:
     /**
      * @brief Check the queue limit, moving events as necessary
      * 
-     * When the file queue exceeds the limit, all events are moved into files.
+     * @details When the file queue exceeds the limit, all events are moved into files.
      * @return true if successfully moved file queue to file system.
      */
     bool checkFileQueueLimits();
@@ -307,8 +352,8 @@ public:
     /**
      * @brief Lock the queue protection mutex
      * 
-     * This is done internally; you probably won't need to call this yourself.
-     * It needs to be public for the WITH_LOCK() macro to work properly.
+     * @note This is done internally; you probably won't need to call this yourself.
+     * @note This needs to be public for the WITH_LOCK() macro to work properly.
      */
     void lock() { os_mutex_recursive_lock(mutex); };
 
@@ -336,7 +381,7 @@ protected:
     /**
      * @brief Constructor 
      * 
-     * This class is a singleton; you never create one of these directly. Use 
+     * @details This class is a singleton; you never create one of these directly. Use 
      * PublishQueuePosix::instance() to get the singleton instance.
      */
     PublishQueuePosix();
@@ -344,7 +389,7 @@ protected:
     /**
      * @brief Destructor
      * 
-     * This class is never deleted; once the singleton is created it cannot
+     * @details This class is never deleted; once the singleton is created it cannot
      * be destroyed.
      */
     virtual ~PublishQueuePosix();
@@ -362,11 +407,11 @@ protected:
     /**
      * @brief Allocate a new event structure in RAM
      * 
-     * The PublishEventQueue structure contains a header and is variably sized for the eventData.
+     * @details The PublishEventQueue structure contains a header and is variably sized for the eventData.
      * 
      * May return NULL if eventName or eventData are invalid (too long) or out of memory.
      * 
-     * You must delete the result from this method when you are done using it. 
+     * @note You must delete the result from this method when you are done using it. 
      */
     PublishQueueEvent *newEvent(const char *eventName, const char *eventData, PublishFlags flags);
 
@@ -375,9 +420,9 @@ protected:
      * 
      * @param fileNum The file number to read 
      * 
-     * May return NULL if file does not exist, or out of memory.
+     * @details May return NULL if file does not exist, or out of memory.
      * 
-     * You must delete the result from this method when you are done using it. 
+     * @note You must delete the result from this method when you are done using it. 
      */
     PublishQueueEvent *readQueueFile(int fileNum);
 
@@ -389,14 +434,14 @@ protected:
     /**
      * @brief State handler for waiting to connect to the Particle cloud
      * 
-     * Next state: stateWait
+     * @details Next state: stateWait
      */
     void stateConnectWait();
 
     /**
      * @brief State handler for waiting to publish
      * 
-     * stateTime and durationMs determine whether to stay in this state waiting, or whether
+     * @details stateTime and durationMs determine whether to stay in this state waiting, or whether
      * to publish and go into statePublishWait.
      * 
      * Next state: statePublishWait or stateConnectWait
@@ -406,30 +451,29 @@ protected:
     /**
      * @brief State handler for waiting for publish to complete
      * 
-     * Next state: stateWait
+     * @details Next state: stateWait
      */
     void statePublishWait();
 
-    /**
-     * @brief SequentialFileRK library object for maintaining the queue of files on the POSIX file system
-     */
-    SequentialFile fileQueue;
+    SequentialFile fileQueue;   //!< SequentialFileRK library object for maintaining the queue of files on the POSIX file system
 
+    EventSourceDest_t source_dest;  //!< Where the event is to be placed or was retrieved during execution.
+    EventPriority_t priority;       //!< The event priority that determines how the event should be stored (ram, flash, sd).
 
-    size_t ramQueueSize = 2; //!< size of the queue in RAM
-    size_t fileQueueSize = 100; //!< size of the queue on the flash file system
+    size_t ramQueueSize = 2;        //!< size of the queue in RAM
+    size_t fileQueueSize = 100;     //!< size of the queue on the flash file system
 
-    os_mutex_recursive_t mutex; //!< mutex for protecting the queue
-    std::deque<PublishQueueEvent*> ramQueue; //!< Queue in RAM
+    os_mutex_recursive_t mutex;     //!< mutex for protecting the queue
+    std::deque<PublishQueueEvent*> ramQueue;    //!< Queue in RAM
 
-    PublishQueueEvent *curEvent = 0; //!< Current event being published
-    int curFileNum = 0; //!< Current file number being published (0 if from RAM queue)
-    unsigned long stateTime = 0; //!< millis() value when entering the state, used for stateWait
-    unsigned long durationMs = 0; //!< how long to wait before publishing in milliseconds, used in stateWait
-    bool publishComplete = false; //!< true if the publish has completed (successfully or not)
-    bool publishSuccess = false; //!< true if the publish succeeded
-    bool pausePublishing = false; //!< flag to pause publishing (used from automated test)
-    bool canSleep = false; //!< returns true if this is a good time to go to sleep
+    PublishQueueEvent *curEvent = 0;    //!< Current event being published
+    int curFileNum = 0;                 //!< Current file number being published (0 if from RAM queue)
+    unsigned long stateTime = 0u;       //!< millis() value when entering the state, used for stateWait
+    unsigned long durationMs = 0u;      //!< how long to wait before publishing in milliseconds, used in stateWait
+    bool publishComplete = false;       //!< true if the publish has completed (successfully or not)
+    bool publishSuccess = false;        //!< true if the publish succeeded
+    bool pausePublishing = false;       //!< flag to pause publishing (used from automated test)
+    bool canSleep = false;              //!< returns true if this is a good time to go to sleep
 
     unsigned long waitAfterConnect = 2000; //!< time to wait after Particle.connected() before publishing
     unsigned long waitBetweenPublish = 1000; //!< how long to wait in milliseconds between publishes

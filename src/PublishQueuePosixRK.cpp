@@ -101,7 +101,7 @@ bool PublishQueuePosix::publishCommon(const char *eventName, const char *eventDa
 
                 bStatus = checkRamQueueLimits();
 
-                if ((bStatus == true) && Particle.connected())
+                if (bStatus == true)
                 {
                     // RAM-based queue is not full, and we are cloud connected
                     // Leave the event in the RAM queue and return true

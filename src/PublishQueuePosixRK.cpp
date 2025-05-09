@@ -73,7 +73,7 @@ void PublishQueuePosix::setup(TimedLock *ParticlePublishLock) {
 }
 
 /**
- * @brief loopp function for this submodule
+ * @brief loop function for this submodule
  */
 void PublishQueuePosix::loop() {
     if (stateHandler) {
@@ -162,7 +162,7 @@ PublishQueueEvent *PublishQueuePosix::newEvent(const char *eventName, const char
 }
 
 /**
- * @brief Writes ramQueue to the POSIX file system on the SD card
+ * @brief Writes ramQueue to the POSIX file system on the MSOM Flash memory
  */
 void PublishQueuePosix::writeQueueToFiles() {
 
@@ -355,7 +355,7 @@ bool PublishQueuePosix::checkFileQueueLimits() {
 }
 
 /**
- * @brief Retrieves the number of events
+ * @brief Retrieves the number of events (from ramQueue)
  */
 size_t PublishQueuePosix::getNumEvents() {
     size_t result = 0;
@@ -421,12 +421,10 @@ void PublishQueuePosix::stateWait() {
     if (!ramQueue.empty()) {
         curEvent = ramQueue.front();
         ramQueue.pop_front();
-        bRAMSource = true;
     }
     else {
         curFileNum = fileQueue.getFileFromQueue(false);
         if (curFileNum) {
-            bRAMSource = false;
             curEvent = readQueueFile(curFileNum);
             if (!curEvent) {
                 // Probably a corrupted file, discard
@@ -440,7 +438,7 @@ void PublishQueuePosix::stateWait() {
         }
     }
     
-    if (curEvent && (bRAMSource == false)) {
+    if (curEvent) {
         stateTime = millis();
         stateHandler = &PublishQueuePosix::statePublishWait;
         publishComplete = false;

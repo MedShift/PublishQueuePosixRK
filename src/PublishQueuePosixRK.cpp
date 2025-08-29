@@ -97,7 +97,7 @@ bool PublishQueuePosix::publishCommon(const char *eventName, const char *eventDa
         {
             WITH_LOCK(*this)
             {
-                _log.trace("ramQueueLen=%u connected=%d", fileQueue.getQueueLen(), ramQueue.size(), Particle.connected());
+                _log.trace("fileQueueLen=%u ramQueueLen=%u connected=%d", fileQueue.getQueueLen(), ramQueue.size(), Particle.connected());
 
                 bStatus = checkRamQueueLimits();
 

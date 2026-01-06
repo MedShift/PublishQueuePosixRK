@@ -192,6 +192,7 @@ void PublishQueuePosix::writeQueueToFiles() {
             fileQueue.addFileToQueue(fileNum);
 
             delete event;
+            delay(1);
         }
     }
 }
@@ -297,6 +298,7 @@ void PublishQueuePosix::clearQueues() {
             ramQueue.pop_front();
 
             delete event;
+            delay(1);
         }
 
         fileQueue.removeAll(true);
@@ -349,6 +351,7 @@ bool PublishQueuePosix::checkFileQueueLimits() {
                 _log.info("discarded event %d", fileNum);
                 bStatus = false;
             }
+            delay(1);
         }
     }
     return bStatus;
